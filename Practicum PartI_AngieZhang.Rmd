@@ -1,0 +1,273 @@
+---
+title: "PART I. Identifying BC & pregnancy"
+author: "Angie Zhang (incorporated Erin's data exploration)"
+date: "March 5th 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+Step #1. Filter patients by gender 
+```{r}
+# Load in 'patients' data
+patients<-read.csv(file.choose()) 
+```
+
+```{r}
+library(dplyr)
+library(tidyr)
+
+# Identify female patients
+female <- patients %>%
+  filter(GENDER=="F")
+
+count(female) 
+head(female)
+```
+There are a total of 721 female patients from our observatons
+
+
+Step #2. Identify BCs vs.non-BC - confirm on gender
+
+The codes assigned to birth control are as follows (sorted by type of bc): 
+(1) Injections:
+  * 1000158 = 0.65 ML depo-subQ provera 160 MG/ML Prefilled Syringe
+  * 1000128 = 1 ML Depo-Provera 150 MG/ML Injection
+(2) Pills:
+  * 748962 = Camila 28 Day Pack
+  * 831533 = Errin 28 Day Pack
+  * 749785 = Ortho Tri-Cyclen 28 Day Pack
+  * 749762 = Seasonique 91 Day Pack
+  * 751905 = Trinessa 28 Day Pack
+  * 748856 = Yaz 28 Day Pack* 1359133 = Estrostep Fe 28 Day Pack
+  * 757594 = Jolivette 28 Day Pack
+  * 748879 = Levora 0.15/30 28 Day Pack
+  * 235389 = Mestranol / Norethynodrel [Enovid]
+(3) IUD/implants:
+  * 1605257 = Liletta 52 MG Intrauterine System
+  * 1856546 = Kyleena 19.5 MG Intrauterine System
+  * 807283 = Mirena 52 MG Intrauterine System
+  * 1111011 = Nexplanon 68 MG Drug Implant
+  * 646250 = Implanon 68 MG Drug Implant
+(4) Viginal Ring:
+  * 1367439 = NuvaRing 0.12/0.015 MG per 24HR 21 Day Vaginal Ring
+
+```{r}
+# Load in 'medications' data
+meds<-read.csv(file.choose()) 
+```
+
+```{r, eval=TRUE, echo=FALSE}
+# label birth control using codes identified above
+bc <- c(1000158, 1000128, 748962, 831533, 1359133, 646250, 757594, 1856546, 748879, 1605257, 235389, 807283, 1111011, 1367439, 749785, 749762, 751905, 748856)
+head(meds)
+
+# create a dataframe for those on bc
+meds_bc<- meds %>% filter(CODE %in% bc)
+
+# Find out the numer of patients who are/were on bc
+meds %>% filter(CODE %in% bc) %>% summarise(n_distinct(PATIENT))
+
+# check to ensure all those who use BC are actually females 
+meds_bc$PATIENT[!(meds_bc$PATIENT %in% female$ID)]
+
+```
+There are 246 unique patients who took birth control, whom are all confirmed to be females. 
+
+
+Step #3. Create indicator variable for birth control: 1 if on BC, 0 if not.
+
+```{r}
+meds_bc$bc_yes <- rep(1, nrow(meds_bc))
+patient_bc <- merge(x=female, y=meds_bc[,c("PATIENT","bc_yes")], by.x="ID", by.y="PATIENT", all.x = TRUE)
+
+patient_bc$bc_yes <- transform(patient_bc, bc_yes=as.numeric(bc_yes))
+
+patient_bc$bc_yes <- ifelse(patient_bc$bc_yes==1,1,0)
+
+names(patient_bc)
+```
+
+
+Step #4, Examine characteristics of BC paitents.
+   (1) Overall: characterstics of those who use BC (by race, age, marital status)
+   (2) By category: pills, IUD, Viginal ring, Inplant, injection,
+
+```{r}
+# add race and marital status columns on meds_bc file, showing the demographic info of those on bc
+med_demo <- merge(x=meds_bc, y=patients[,c("ID","RACE","MARITAL")], by.x="PATIENT", by.y="ID", all.x = TRUE)
+head(med_demo)
+med_race<- med_demo%>%
+  group_by(RACE)%>%
+  tally
+
+med_race 
+barplot(med_race$n)
+```
+
+```{r}
+#marital status
+
+med_marital<- med_demo%>%
+  group_by(MARITAL)%>%
+  tally
+med_marital
+barplot(med_marital$n)
+```
+
+```{r}
+# Calculate patients age
+# install.packages('eeptools')
+library(eeptools)
+library(lubridate)
+
+patients$BIRTHDATE<-ymd(patients$BIRTHDATE, format="%m/%d/%Y")
+patients$DEATHDATE<-ymd(patients$DEATHDATE, format="%m/%d/%Y")
+str(patients$BIRTHDATE)
+patients%>% 
+  mutate(age= as.period(interval(patients$BIRTHDATE, patients$DEATHDATE), unit = "year"))
+  as.numeric(age)
+head(age)
+
+#mutate( age = age_calc(patients$BIRTHDATE, enddate = Sys.Date(), units='years', precise = FALSE)
+#patients$age <- age_calc(dob=patients$BIRTHDATE, enddate = patients$DEATHDATE, units='years', precise = FALSE)
+```
+
+  
+  
+Step #5. Identify Pregnant vs.non-Pregnant (using Careplan, Conditions and Encounter Dataset )
+
+### Careplan
+```{r}
+# load Careplan file
+care<-read.csv(file.choose()) 
+```
+
+```{r, eval=TRUE, echo=FALSE}
+# Looking at normal pregnancies within Careplans dataset.
+library(dplyr)
+normpreg <- care %>%
+  filter(REASONDESCRIPTION=="Normal pregnancy")
+normpreg %>% summarize(n_distinct(PATIENT))
+```
+In the Careplans csv, there are 167 pregnancies. The condition descriptions for patients without any "ReasonDescription," by and large, do not appear to reflect pregnancies. 
+
+### Conditions
+```{r}
+# Load in conditions data
+cond<-read.csv(file.choose()) 
+```
+
+An initial review of conditions data revealed there are 10 descriptions that could relate to pregenancy.
+```{r, eval=TRUE, echo=FALSE}
+obs <- c("Antepartum eclampsia", "Blighted ovum", "Complication occuring during pregnancy", "Congenital uterine anomaly", "Fetus with chromosomal abnormality", "Miscarriage in first trimester", "Miscarriage in second trimester", "Normal pregnancy", "Preeclampsia", "Tubal pregnancy")
+allpreg <- cond %>%
+  filter(DESCRIPTION %in% obs)
+allpreg %>% summarize(n_distinct(PATIENT))
+```
+In the Conditions csv, there are 139 unique patients with pregnancy-related descriptions. 
+
+### Encounters
+```{r}
+# Load in encounters data
+encount<-read.csv(file.choose()) 
+```
+
+In the Encounters csv, three Descriptions seem specific to pregnancies, "Obstretric emergency hospital admission," "Prenatal initial visit," and "Prenatal visit." When applying the same pregnancy-related categories used for the Conditions csv to the ReasonDescription column, "Admission to surgical department" and "Patient-initiated encounter" were highlighted, indicating that the three categories I initially identified do not comprehensively select all pregnancy-related encounters. The following code tries to account for that. 
+
+```{r, eval=TRUE, echo=FALSE}
+obs2 <- c("Obstretric emergency hospital admission", "Prenatal initial visit", "Prenatal visit")
+pregencount <- encount %>%
+  filter(DESCRIPTION %in% obs2 | REASONDESCRIPTION %in% obs)
+pregencount %>% summarise(n_distinct(PATIENT))
+```
+Per the Encounters csv, there are 135 patients who attended pregnancy-related doctor's appointments (which is taken as a proxy for pregnancy).
+
+## Merging datasets
+combine the three datasets from above to find out the number of unique pregnancies.
+```{r, eval=TRUE, echo=FALSE}
+half <- merge(x=pregencount, y=normpreg, by="PATIENT", all = TRUE) #combine encounter with careplan data
+
+colnames(half)[2]<-"enc.ID"
+colnames(half)[3]<-"enc.DATE"
+colnames(half)[4]<-"enc.CODE"
+colnames(half)[5] <- "enc.DESCRIPTION"
+colnames(half)[6] <-"enc.REASONCODE"
+colnames(half)[7] <-"enc.REASONDESCRIPTION"
+colnames(half)[8] <-"cp.ID"
+colnames(half)[9] <-"cp.START"
+colnames(half)[10] <-"cp.STOP"
+colnames(half)[11] <-"cp.ENCOUNTER"
+colnames(half)[12] <-"cp.CODE"
+colnames(half)[13] <-"cp.DESCRIPTION"
+colnames(half)[14]<-"cp.REASONCODE"
+colnames(half)[15] <-"cp.REASONDESCRIPTION"
+
+names(half)
+
+all <- merge(x=half, y=allpreg, by="PATIENT", all = TRUE) #combine with conditions data
+
+colnames(all)[16]<-"cond.START"
+colnames(all)[17]<-"cond.STOP"
+colnames(all)[18]<-"cond.ENCOUNTER"
+colnames(all)[19]<-"cond.CODE"
+colnames(all)[20]<-"cond.DESCRIPTION"
+names(all)
+all %>% summarize(n_distinct(PATIENT))
+```
+There are 191 unique pregnancies amongst the three spreadsheets. 
+
+
+Step #6. BC to Pregnant
+```{r, eval=TRUE, echo=FALSE}
+meds_bc <- meds %>%
+  filter(CODE %in% bc)
+names(meds_bc)[names(meds_bc) == "CODE"] <- "CODE.bc"
+names(meds_bc)[names(meds_bc) == "DESCRIPTION"] <- "DESCRIPTION.bc"
+both <- merge(x=meds_bc, y=all, by="PATIENT")
+both %>% summarize(n_distinct(PATIENT))
+```
+141 women who are on birth control got pregnant (or at least had a pre-pregnancy consultation).
+
+
+Step #7. Check for multiple instances of pregnancy 
+```{r}
+library(psych)
+names(all)
+all$cp.START <- as.Date.POSIXct(all$cp.START, tryFormats = "%m/%d/%Y")
+all$cp.STOP <- as.Date.POSIXct(all$cp.STOP, tryFormats = "%m/%d/%Y")
+all$cond.START <- as.Date.POSIXct(all$cond.START, tryFormats = "%m/%d/%Y")
+all$cond.STOP <- as.Date.POSIXct(all$cond.STOP, tryFormats = "%m/%d/%Y")
+str(all)
+
+all%>%
+  group_by(PATIENT) %>%
+  with(., difftime(max(cp.START), min(cp.STOP)))
+
+
+
+all$df_cp <- all$cp.STOP - all$cp.START
+all$df_cond <- all$cond.STOP - all$cond.START
+
+describe(all$df_cp)
+
+all%>%
+  group_by(PATIENT) %>%
+  summarize(cp_days=sum(df_cp),cond_days=sum(df_cond))
+
+head(all$df_cp)
+head(all$df_cond)
+
+```
+
+Min and max dates that indicate that (>9months)
+
+
+
+
+
+
+
