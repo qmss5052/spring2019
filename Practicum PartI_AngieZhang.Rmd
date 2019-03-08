@@ -2,7 +2,7 @@
 title: "PART I. Identifying BC & pregnancy"
 author: "Angie Zhang (incorporated Erin's data exploration)"
 date: "March 5th 2019"
-output: html_document
+output: html_notebook
 ---
 
 ```{r setup, include=FALSE}
@@ -103,9 +103,11 @@ head(med_demo)
 med_race<- med_demo%>%
   group_by(RACE)%>%
   tally
-
-med_race 
-barplot(med_race$n)
+med_race
+barplot(med_race$n,main = "Race Distribution for bc users",
+xlab = "Race",
+ylab = "# of Patients",
+names.arg = c("asian","black","hispanic","white"))
 ```
 
 ```{r}
@@ -115,7 +117,9 @@ med_marital<- med_demo%>%
   group_by(MARITAL)%>%
   tally
 med_marital
-barplot(med_marital$n)
+barplot(med_marital$n, main="Distribution of marital status for bc users", xlab ="marital status", ylab="# of patients", names.arg=c("N/A","Married","Single"))
+
+
 ```
 
 ```{r}
