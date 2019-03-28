@@ -416,7 +416,7 @@ durationsFV %>% filter(bc.yes==1) %>%
   arrange(bc.start)
 ```
 
-Notice there are a lot (223) of women whose first encounter date proceeds their bc.start date. Will this will be an issue if we use first encounter date to set age (as discussed last week)?
+Notice there are a lot (223) of women whose birth control prescription date (bc.start) proceeds their first encounter date. This should not be an issue for the EHA. 
 
 ```{r}
 #How many women have a bc prescription date that proceeds their first encounter date? 
