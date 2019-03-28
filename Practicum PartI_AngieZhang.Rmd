@@ -369,7 +369,7 @@ durations %>% filter(bc.yes==1) %>%
   arrange(desc(bc.start))
 ```
 
-Removing the following four patients:
+The following four patients have unrealistic birth control start dates. Rather than removing them from the dataset, all four are now recoded as not being on birth control.
 
 * Number a8b24df6-d727-45d2-b269-cf482c17a402 
   + encounter ID number 2d536593-07c9-4ec1-b2af-1dc97848718a. 
@@ -391,20 +391,25 @@ Removing the following four patients:
   + Her bc start date is 2060-10-29.
   + Her only encounter date was 1961-01-23.
 
-Issue - does this mean these patients should be removed from Angie's data.frames? Should I have dealt with these differently (e.g. recode them as just not on birth control)? 
+Issue - This means these patients should also be recoded as not on birth control in Angie's data.frames. 
 
 ```{r}
 tail(durations %>% filter(bc.yes==1) %>%
   group_by(PATIENT, bc.type) %>%
   arrange(desc(bc.start)))
 
-#Removing the four patients whose bc start dates don't make sense. That should reduce the number of patients who ever used birth control to 242.
+#Changing the four patients whose bc start dates don't make sense to not on birth control by adjusting the bc.yes, bc.start, and bc.stop variables. That should reduce the number of patients who ever used birth control to 242.
 
-remove <- c("a8b24df6-d727-45d2-b269-cf482c17a402", "f88d0d0e-614b-4ab2-aae4-12d103778e0a", "492624fb-49dc-4e16-b6b9-b41619934cd4", "cf9a3357-e145-480e-a2b9-7f9c595b9783")
+notonbc <- c("a8b24df6-d727-45d2-b269-cf482c17a402", "f88d0d0e-614b-4ab2-aae4-12d103778e0a", "492624fb-49dc-4e16-b6b9-b41619934cd4", "cf9a3357-e145-480e-a2b9-7f9c595b9783")
 
 durationsFV <- durations %>%
-  filter(!PATIENT %in% remove)
-length(unique(durationsFV$PATIENT[durationsFV$bc.yes==1])) #242, lovely. 
+  mutate(bc.yes = ifelse(PATIENT %in% notonbc, 0, bc.yes), bc.start = ifelse(PATIENT %in% notonbc, NA, bc.start), bc.stop = ifelse(PATIENT %in% notonbc, NA, bc.stop))
+
+#Checking recodes...
+table(durations$bc.yes)
+table(durationsFV$bc.yes) #ISSUE: 5 patients were recoded to not being pregnant instead of four...
+
+length(unique(durationsFV$PATIENT[durationsFV$bc.yes==1])) #However the number of patients on  birth control, 242, is correct. 
 
 durationsFV %>% filter(bc.yes==1) %>%
   group_by(PATIENT, bc.type) %>%
