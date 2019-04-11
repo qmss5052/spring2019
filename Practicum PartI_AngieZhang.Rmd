@@ -403,7 +403,7 @@ tail(durations %>% filter(bc.yes==1) %>%
 notonbc <- c("a8b24df6-d727-45d2-b269-cf482c17a402", "f88d0d0e-614b-4ab2-aae4-12d103778e0a", "492624fb-49dc-4e16-b6b9-b41619934cd4", "cf9a3357-e145-480e-a2b9-7f9c595b9783")
 
 durationsFV <- durations %>%
-  mutate(bc.yes = ifelse(PATIENT %in% notonbc, 0, bc.yes), bc.start = ifelse(PATIENT %in% notonbc, NA, bc.start), bc.stop = ifelse(PATIENT %in% notonbc, NA, bc.stop))
+  mutate(bc.yes = ifelse(PATIENT %in% notonbc, 0, bc.yes), bc.start = as.Date(ifelse(PATIENT %in% notonbc, NA, as.character(bc.start))), bc.stop = as.Date(ifelse(PATIENT %in% notonbc, NA, as.character(bc.stop))))
 
 #Checking recodes...
 table(durations$bc.yes)
@@ -558,4 +558,3 @@ sumstats <- durationsFV %>% select(-en.id) %>% #removing encounter-specific data
   mutate(avg.bc.length = mean(bc.length), sd.bc.length = sd(bc.length))
 tbl_df(sumstats)
 ```
-
