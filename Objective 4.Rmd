@@ -1,0 +1,478 @@
+---
+title: "Objective 4"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "/Users/chanamessinger/Dropbox/Columbia/Practicum/Data/csv")
+getwd()
+
+packages <- c("tmap", "devtools","knitr","tidyverse","broom", "DT","ggmap", "ggthemes", "maps", "statebins", "stringr","scales","tidyverse","readxl","statebins","RJSONIO","XML","RCurl", "readr", "tidyr", "dplyr", "ggplot2", "rgdal", "leaflet", "RColorBrewer", "rqog", "censusr", "rtweet")
+
+
+packages <- lapply(packages, FUN = function(x) {
+  if(!require(x, character.only = TRUE)) {
+    install.packages(x)
+  library(x, character.only = TRUE)
+  }
+}
+)
+library(zipcode)
+```
+
+Extract zipcode from patient adddress, then inner join it on the meds and extract latitude and longitude
+```{r}
+setwd("/Users/chanamessinger/Dropbox/Columbia/Practicum/spring2019/My Data")
+# save_as_csv(meds_bc, file_name = "meds_bc")
+# save_as_csv(patient_bc, file_name = "patient_bc")
+
+meds_bc <- read_csv("meds_bc.csv")
+patient_bc <- read_csv("patient_bc.csv")
+
+
+meds_bc <- meds_bc %>%
+  rename(ID = PATIENT)
+
+patient_bc_info <- patient_bc %>%
+  select("ID", "ADDRESS") %>%
+  mutate(zip = as.character(str_sub(str_extract_all(ADDRESS, "[A-Z]{2} [0-9]{5}"), 4)))
+  
+
+data(zipcode)
+zipcode$zip <- as.character(zipcode$zip)
+
+patient_bc_info <- inner_join(patient_bc_info, zipcode, by = "zip")
+
+patient_bc_info <- inner_join(meds_bc, patient_bc_info, "ID") %>%
+  select(-"REASONCODE", -"REASONDESCRIPTION")
+```
+
+Create a factor for the type of BC
+```{r}
+patient_bc_info <- patient_bc_info %>%
+  mutate(
+    BCTYPE = case_when(
+    CODE.bc %in% c(1000158, 1000128) ~ "Injection",
+    CODE.bc %in% c(748962, 831533, 749785, 749762, 751905, 748856, 1359133, 757594, 748879, 235389) ~ "Pills",
+    CODE.bc %in% c(1605257, 1856546, 807283, 1111011, 646250) ~ "LARC",
+    CODE.bc == 1367439 ~ "Ring",
+    TRUE ~ "Other"
+    )
+  )
+
+patient_bc_info$BCTYPE <- as.factor(patient_bc_info$BCTYPE)
+```
+
+
+Put a population column for each geoid (county/tract)
+```{r}
+setwd("/Users/chanamessinger/Dropbox/Columbia/Practicum/spring2019/My data")
+population <- read_csv("censustract.csv")
+population <- population %>%
+  select("GEOID", "POP10") %>%
+  rename("Population" = "POP10", "TRACTCE" = "GEOID") %>%
+  mutate(TRACTCE = as.numeric(TRACTCE))
+```
+
+Append census tract population to info dataframe.
+```{r}
+patient_bc_info <- patient_bc_info %>%
+  rename(lat = latitude, lon = longitude)
+
+patient_bc_info <- left_join(patient_bc_info, population, by = "TRACTCE") %>%
+  rename("TractPop" = "Population")
+
+
+
+# patient_bc_info <- append_geoid(patient_bc_info, "tr")
+# patient_bc_info <- patient_bc_info %>%
+#   rename(TRACTCE = geoid)
+# patient_bc_info <- append_geoid(patient_bc_info, "co")
+# could have taken above from the tract
+
+# patient_bc_info <- patient_bc_info %>%
+#   rename(COUNTYFP = geoid)
+# setwd("/Users/chanamessinger/Dropbox/Columbia/Practicum/spring2019/My data")
+# save_as_csv(patient_bc_info, file_name = "patient_bc_info")
+```
+Start here
+
+```{r}
+setwd("/Users/chanamessinger/Dropbox/Columbia/Practicum/spring2019/My data")
+patient_bc_info <- read_csv("patient_bc_info.csv")
+```
+
+
+Get most common birth control by county
+```{r}
+bc_by_county <- patient_bc_info %>%
+  group_by(`COUNTYFP`) %>%
+  count(BCTYPE) %>%
+  spread(BCTYPE, n) %>%
+  mutate(PILLPROP = Pills/sum(Pills, Ring, Injection, LARC, na.rm = T)) %>%
+  ungroup() %>%
+  mutate(COUNTYFP = str_sub(COUNTYFP, 3))
+```
+
+Get most common birth control by census tracts
+```{r}
+bc_by_tract <- patient_bc_info %>%
+  group_by(`TRACTCE`) %>%
+  count(BCTYPE) %>%
+  spread(BCTYPE, n) %>%
+  mutate(PILLPROP = Pills/sum(Pills, Ring, Injection, LARC, na.rm = T)) %>%
+  ungroup() %>%
+  mutate(TRACTCE = str_sub(TRACTCE, 6))
+
+bc_by_tract2 <- distinct(bc_by_tract, TRACTCE, .keep_all = TRUE)
+
+```
+
+Map Function
+
+```{r}
+create_map <- function(level = "co", data, fill){
+  setwd("/Users/chanamessinger/Dropbox/Columbia/Practicum/spring2019/My data/Shape Files")
+  mass_census <- readOGR("mass_census/.","cb_2017_25_tract_500k")
+  
+   if (level %in% c("county", "co", "County")) {
+    gradation = "COUNTYFP" 
+    } else if (level %in% c("tract", "tr", "Tract", "Census Tract", "censustract", "census tract")) {
+      gradation = "TRACTCE" 
+      } else {
+        print("Try co or tr for level")
+      }
+  
+  shape_with_data <- mass_census@data %>% 
+  left_join(data, by = gradation)
+  
+  mass_census@data <- shape_with_data
+  
+  tm <- tm_shape(mass_census) + tm_borders() + tm_fill(fill)
+  tm
+  return(tm)
+}
+```
+
+
+
+Map with county shape files (not working)
+```{r}
+# setwd("/Users/chanamessinger/Dropbox/Columbia/Practicum/spring2019/My data/Shape Files")
+# county_map <- readOGR("tl_2018_us_county/.","tl_2018_us_county")
+# county_map@data <- filter(county_map@data, STATEFP == 25)
+# 
+# shape_with_data <- county_map@data %>% 
+#   left_join(bc_by_county, by = "COUNTYFP")
+# 
+# county_map@data <- shape_with_data
+# 
+# tm_shape(county_map) + tm_borders() + tm_fill()
+# 
+# 
+# county_map2 <- merge(county_map, bc_by_county, by="COUNTYFP")
+
+```
+
+Maps
+```{r}
+create_map("co", bc_by_county, "PILLPROP")
+create_map("tr", bc_by_tract2, "PILLPROP")
+```
+
+```{r}
+bc_by_county2 <- patient_bc_info %>%
+  group_by(`COUNTYFP`) %>%
+  count(BCTYPE) %>%
+  spread(BCTYPE, n) %>%
+  mutate(LARCPROP = LARC/sum(Pills, Ring, Injection, LARC, na.rm = T)) %>%
+  ungroup() %>%
+  mutate(COUNTYFP = str_sub(COUNTYFP, 3))
+
+
+bc_by_tract2 <- patient_bc_info %>%
+  group_by(`TRACTCE`) %>%
+  count(BCTYPE) %>%
+  spread(BCTYPE, n) %>%
+  mutate(LARCPROP = LARC/sum(Pills, Ring, Injection, LARC, na.rm = T)) %>%
+  ungroup() %>%
+  mutate(TRACTCE = str_sub(TRACTCE, 6)) %>%
+  distinct(TRACTCE, .keep_all = TRUE)
+
+```
+
+```{r}
+create_map("co", bc_by_county2, "LARCPROP")
+create_map("tr", bc_by_tract2, "LARCPROP")
+
+```
+(Second most common contraceptive method in each county)
+
+```{r}
+bc_by_county3 <- patient_bc_info %>%
+  group_by(`COUNTYFP`) %>%
+  count(BCTYPE) %>%
+  spread(BCTYPE, n) %>% 
+  ungroup() %>%
+  select(-COUNTYFP) %>%
+  rownames_to_column() %>%
+  gather(column, value, -rowname) %>%
+  group_by(rowname) %>% 
+  mutate(rk = rank(-value, ties.method = "first")) %>%
+  filter(rk == 2) %>% 
+  arrange(as.numeric(rowname), rk) 
+
+bc_by_county4 <- patient_bc_info %>%
+  group_by(`COUNTYFP`) %>%
+  count(BCTYPE) %>%
+  spread(BCTYPE, n) %>% 
+  ungroup() %>%
+  rownames_to_column() %>%
+  select(rowname, COUNTYFP)
+
+bc_by_county3 <- inner_join(bc_by_county3, bc_by_county4, by = "rowname") %>%
+  ungroup() %>%
+  select(COUNTYFP, column) %>%
+  rename("SecondMost" = "column") %>%
+  mutate(SecondMost = as.factor(SecondMost)) %>%
+  mutate(COUNTYFP = str_sub(COUNTYFP, 3))
+```
+
+```{r}
+bc_by_tract3 <- patient_bc_info %>%
+  group_by(`TRACTCE`) %>%
+  count(BCTYPE) %>%
+  spread(BCTYPE, n) %>% 
+  ungroup() %>%
+  select(-TRACTCE) %>%
+  rownames_to_column() %>%
+  gather(column, value, -rowname) %>%
+  group_by(rowname) %>% 
+  mutate(rk = rank(-value, ties.method = "first")) %>%
+  filter(rk == 2) %>% 
+  arrange(as.numeric(rowname), rk) 
+
+bc_by_tract4 <- patient_bc_info %>%
+  group_by(`TRACTCE`) %>%
+  count(BCTYPE) %>%
+  spread(BCTYPE, n) %>% 
+  ungroup() %>%
+  rownames_to_column() %>%
+  select(rowname, TRACTCE)
+
+bc_by_tract3 <- inner_join(bc_by_tract3, bc_by_tract4, by = "rowname") %>%
+  ungroup() %>%
+  select(TRACTCE, column) %>%
+  rename("SecondMost" = "column") %>%
+  mutate(SecondMost = as.factor(SecondMost)) %>%
+  mutate(TRACTCE = str_sub(TRACTCE, 6)) %>%
+  distinct(TRACTCE, .keep_all = TRUE)
+  
+```
+
+
+
+```{r}
+create_map("co", bc_by_county3, "SecondMost")
+create_map("tr", bc_by_tract3, "SecondMost")
+
+```
+Data cleaning
+```{r}
+# setwd("/Users/chanamessinger/Dropbox/Columbia/Practicum/spring2019/My data")
+# 
+# census_data_healthcare <- read_csv("ECN_2012_US_62Z1_with_ann.csv")
+# census_data_healthcare_sub <- census_data_healthcare[-1,]
+# 
+# offices <- c("Health care and social assistance", "HMO medical centers", "Hospitals", "Offices of physicians")
+# 
+# census_data_healthcare_sub <- census_data_healthcare %>%
+#   rename("zip" = "GEO.id2", "Office Type" = "NAICS.display-label") %>%
+#   select(zip, `Office Type`, ESTAB) %>%
+#   mutate(ESTAB = as.numeric(ESTAB)) %>%
+#   group_by(zip, `Office Type`) %>%
+#   summarise(ESTABS = sum(ESTAB)) %>%
+#   ungroup() %>%
+#   filter(`Office Type` %in% offices)
+# 
+# census_estabs <- census_data_healthcare_sub %>%
+#   group_by(zip) %>%
+#   summarize(Total = sum(ESTABS))
+# 
+# census_estabs <- inner_join(census_estabs, zipcode, by = "zip") %>%
+#   rename("lat" = "latitude", "lon" = "longitude")
+# 
+# census_estabs <- append_geoid(census_estabs, "tr")
+# census_estabs <- census_estabs %>%
+#   mutate(COUNTYFP = str_sub(geoid, 1, 5)) %>%
+#   rename(TRACTCE = "geoid")
+# 
+# setwd("/Users/chanamessinger/Dropbox/Columbia/Practicum/spring2019/My data")
+# save_as_csv(census_estabs, file_name = "census_estabs")
+```
+
+
+```{r}
+setwd("/Users/chanamessinger/Dropbox/Columbia/Practicum/spring2019/My data")
+census_estabs <- read_csv("census_estabs.csv")
+
+
+census_estabs2 <- census_estabs %>%
+  select(COUNTYFP, Total) %>%
+  group_by(COUNTYFP) %>%
+  summarize(`Total Health Care Establishments` = sum(Total)) %>%
+  mutate(COUNTYFP = str_sub(COUNTYFP, 3))
+
+patient_bc_info2 <- select(patient_bc_info, TRACTCE, TractPop)  %>%
+  mutate(TRACTCE = as.character(TRACTCE))
+
+census_estabs2_tract <- census_estabs %>%
+  select(TRACTCE, Total) %>%
+  inner_join(patient_bc_info2, by = "TRACTCE") %>%
+  group_by(TRACTCE, TractPop) %>%
+  summarize(`Total Health Care Establishments` = sum(Total)) %>%
+  ungroup() %>%
+  mutate(`Health Care Establishments per Capita` = `Total Health Care Establishments`/TractPop) %>%
+  mutate(TRACTCE = str_sub(TRACTCE, 6)) %>%
+  distinct(TRACTCE, .keep_all = TRUE)
+```
+
+```{r}
+create_map("co", census_estabs2, "Total Health Care Establishments")
+create_map("tr", census_estabs2_tract, "Health Care Establishments per Capita")
+
+```
+(health care per capita)
+```{r}
+patient_sub <- patients %>%
+  select("ID", "ADDRESS")
+
+patient_sub$zip <- str_extract_all(patient_sub$ADDRESS, "[A-Z]{2} [0-9]{5}")
+patient_sub$zip <- str_sub(patient_sub$zip, 4)
+patient_sub$zip <- as.character(patient_sub$zip)
+
+patient_sub <- inner_join(patient_sub, zipcode, by = "zip")
+
+
+patient_sub <- patient_sub %>%
+  rename(lat = latitude, lon = longitude)
+
+#patient_census <- append_geoid(patient_bc_type, "co")
+
+patient_census <- read_csv("/Users/chanamessinger/Dropbox/Columbia/Practicum/spring2019/My data/patient_census.csv")
+
+patients <- read_csv("/Users/chanamessinger/Dropbox/Columbia/Practicum/Data/csv/patients.csv")
+
+patient_census <- patient_census %>%
+  select(ID, lat, lon, COUNTYFP)
+save_as_csv(patient_census, file_name = "patient_census")
+
+patient_census <- patient_bc_info %>%
+  select(ID, lat, lon, COUNTYFP, TRACTCE)
+```
+
+
+```{r}
+observations <- read_csv(file.choose())
+
+obs_sub <- observations %>%
+  filter(DESCRIPTION == "Body Mass Index") %>%
+  select(-CODE, -UNITS, -DESCRIPTION) %>%
+  group_by(PATIENT) %>%
+  filter(DATE == min(as.Date(DATE))) %>%
+  rename(ID = PATIENT)
+
+
+obs_sub <- left_join(obs_sub, patient_census, by = "ID") %>%
+  filter(is.na(COUNTYFP) == F) %>%
+  distinct()
+
+bmi <- obs_sub %>%
+  mutate(BMI = as.numeric(VALUE)) %>%
+  group_by(COUNTYFP) %>%
+  summarize(mean_bmi = mean(BMI)) %>%
+  mutate(COUNTYFP = str_sub(COUNTYFP, 3))
+
+bmi_tract <- obs_sub %>%
+  mutate(BMI = as.numeric(VALUE)) %>%
+  group_by(TRACTCE) %>%
+  summarize(mean_bmi = mean(BMI)) %>%
+  mutate(TRACTCE = str_sub(TRACTCE, 6)) %>%
+  distinct(TRACTCE, .keep_all = TRUE)
+```
+
+Maps
+```{r}
+create_map("co", bmi, "mean_bmi")
+create_map("tr", bmi_tract, "mean_bmi")
+```
+
+
+Food Desert Data
+(Look at Erin's)
+
+```{r}
+setwd("/Users/chanamessinger/Dropbox/Columbia/Practicum/spring2019/My data")
+food_desert <- read_csv("FoodDesert.csv")
+CountyName <- c("Barnstable", "Berkshire", "Bristol", "Dukes", "Essex", "Franklin", "Hampden", "Hampshire", "Middlesex", "Nantucket", "Norfolk", "Plymouth", "Suffolk", "Worcester")
+COUNTYFP <- c("001", "003", "005", "007", "009", "011", "013", "015", "017", "019", "021", "023", "025", "027")
+mass_counties <- as.data.frame(cbind(CountyName,COUNTYFP))
+food_desert_sub <- food_desert %>%
+  filter(State == "MA")
+
+food_desert_sub <- left_join(food_desert_sub, mass_counties, "CountyName")
+
+food_desert_sub <- food_desert_sub %>%
+  group_by(COUNTYFP) %>%
+  summarize(perlowaccess = sum(LOWA_POP)/sum(TOTALPOP))
+
+bmi_food_data <- left_join(bmi, food_desert_sub)
+```
+
+```{r}
+create_map("co", bmi_food_data, "perlowaccess")
+create_map("co", bmi_food_data, "mean_bmi")
+```
+```{r}
+setwd("/Users/chanamessinger/Dropbox/Columbia/Practicum/spring2019/My data/Shape Files")
+mass_census <- readOGR("mass_census/.","cb_2017_25_tract_500k")
+  View(mass_census@data)
+  
+shape_with_data <- mass_census@data %>% 
+  left_join(bmi_food_data, by = "COUNTYFP")
+  
+mass_census@data <- shape_with_data
+
+merged <- geo_join(bmi_food_data, mass_census, "COUNTYFP")
+
+pal <- colorNumeric("Reds", domain=bmi_food_data$mean_bmi)
+pal2 <- colorNumeric("Blues", domain=bmi_food_data$perlowaccess)
+
+
+mass_census@data %>% 
+  leaflet() %>% 
+  addTiles() %>% 
+  addPolygons(data = mass_census,
+              fillColor = ~pal(mass_census@data$mean_bmi),
+              fillOpacity = 1,
+              popup = ~shape_with_data$perlowaccess) %>%
+  addLegend(pal = pal, 
+            values = mass_census$mean_bmi, 
+            position = "bottomright", 
+            title = "Mean BMI In Each County")
+
+# mass_census@data %>% 
+#   leaflet() %>% 
+#   addTiles() %>% 
+#   addMarkers(data = select(mass_census@data, lat, long, COUNTYFP, mean_bmi),
+#               group = "bmi") %>%
+#   addMarkers(data = select(mass_census, COUNTYFP, perlowaccess),
+#               fillColor = ~pal2(mass_census@data$perlowaccess),
+#               fillOpacity = 1,
+#               group = "food") %>%
+#   addLegend(pal = pal, 
+#             values = mass_census$mean_bmi, 
+#             position = "bottomright", 
+#             title = "Mean BMI In Each County")
+```
+
